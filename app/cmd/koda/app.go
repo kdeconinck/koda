@@ -43,7 +43,36 @@ package main
 import (
 	"fmt"
 	"os"
+	"sort"
+
+	"github.com/kdeconinck/koda/internal/compiler"
+	"github.com/kdeconinck/koda/internal/engine"
+	"github.com/kdeconinck/koda/internal/parser"
+	"github.com/kdeconinck/koda/internal/scanner"
+	"github.com/kdeconinck/koda/internal/validator"
 )
+
+const version = "0.1.0"
+
+const (
+	colorReset  = "\033[0m"
+	colorBold   = "\033[1m"
+	colorDim    = "\033[2m"
+	colorRed    = "\033[31m"
+	colorGreen  = "\033[32m"
+	colorYellow = "\033[33m"
+	colorBlue   = "\033[34m"
+	colorCyan   = "\033[36m"
+)
+
+// FileReport contains all diagnostics produced for a single target file.
+type FileReport struct {
+	// FileName is the display name of the analyzed file.
+	FileName string
+
+	// Diagnostics contains all issues reported for this file.
+	Diagnostics []engine.Diagnostic
+}
 
 // The main entry point of the application.
 //
@@ -66,8 +95,166 @@ func main() {
 //
 // It should return an error instead of terminating the process.
 func run() error {
-	// TODO: Initialize configuration.
-	// TODO: Load extension specifications.
-	// TODO: Execute formatting or analysis pipeline.
+	args := os.Args[1:]
+
+	if len(args) != 2 {
+		printHeader()
+		printUsage()
+
+		return fmt.Errorf("%sinvalid arguments%s", colorRed, colorReset)
+	}
+
+	configPath, targetPath := args[0], args[1]
+
+	printHeader()
+	fmt.Printf("%sConfig:%s %s\n", colorBlue, colorReset, configPath)
+	fmt.Printf("%sTarget:%s %s\n\n", colorBlue, colorReset, targetPath)
+
+	configSource, err := os.ReadFile(configPath)
+
+	if err != nil {
+		return fmt.Errorf("failed to read config file %q: %w", configPath, err)
+	}
+
+	targetSource, err := os.ReadFile(targetPath)
+
+	if err != nil {
+		return fmt.Errorf("failed to read target file %q: %w", targetPath, err)
+	}
+
+	tokens, err := scanner.Scan(string(configSource))
+
+	if err != nil {
+		return fmt.Errorf("scanner error: %w", err)
+	}
+
+	profile, err := parser.Parse(tokens)
+
+	if err != nil {
+		return fmt.Errorf("parser error: %w", err)
+	}
+
+	if err := validator.Validate(profile); err != nil {
+		return fmt.Errorf("validation error: %w", err)
+	}
+
+	compiledProfile := compiler.Compile(profile)
+
+	result := engine.Analyze(compiledProfile, string(targetSource))
+
+	reports := []FileReport{
+		{
+			FileName:    targetPath,
+			Diagnostics: result.Diagnostics,
+		},
+	}
+
+	// Print diagnostics.
+	printReports(reports)
+
 	return nil
+}
+
+// Prints the CLI header with product name and version information.
+func printHeader() {
+	fmt.Println("")
+	fmt.Printf(
+		"%s%sKoda%s - %sThe universal linter & code formatter.%s %s(v%s)%s\n",
+		colorBold,
+		colorCyan,
+		colorReset,
+		colorDim,
+		colorReset,
+		colorYellow,
+		version,
+		colorReset,
+	)
+
+	fmt.Printf("%s%s%s\n\n", colorDim, "------------------------------------------------------------", colorReset)
+}
+
+// Prints the command usage in a readable format.
+func printUsage() {
+	fmt.Printf("%sUsage:%s koda <config.core> <target-file>\n\n", colorBold, colorReset)
+}
+
+func printReports(reports []FileReport) {
+	totalIssues := countDiagnostics(reports)
+
+	if totalIssues == 0 {
+		fmt.Printf("%s%sNo issues detected.%s\n", colorGreen, colorBold, colorReset)
+		return
+	}
+
+	sortedReports := sortReports(reports)
+
+	for _, report := range sortedReports {
+		if len(report.Diagnostics) == 0 {
+			continue
+		}
+
+		printFileReport(report)
+	}
+
+	fmt.Printf(
+		"%s%sTotal issues detected:%s %s%d%s\n",
+		colorBold,
+		colorYellow,
+		colorReset,
+		colorRed,
+		totalIssues,
+		colorReset,
+	)
+}
+
+// Prints the diagnostics of a single file as one visual group.
+func printFileReport(report FileReport) {
+	fmt.Printf(
+		"%s%sFile:%s %s%s%s\n",
+		colorBold,
+		colorBlue,
+		colorReset,
+		colorCyan,
+		report.FileName,
+		colorReset,
+	)
+
+	fmt.Printf("%s%s%s\n", colorDim, "", colorReset)
+
+	for _, diagnostic := range report.Diagnostics {
+		fmt.Printf(
+			"  %s[%d:%d]%s %s→%s %s\n",
+			colorYellow,
+			diagnostic.Span.Start.Line,
+			diagnostic.Span.Start.Column,
+			colorReset,
+			colorRed,
+			colorReset,
+			diagnostic.Message,
+		)
+	}
+
+	fmt.Println()
+}
+
+// Returns the total number of diagnostics across all file reports.
+func countDiagnostics(reports []FileReport) int {
+	total := 0
+
+	for _, report := range reports {
+		total += len(report.Diagnostics)
+	}
+
+	return total
+}
+
+// Returns file reports sorted by file name for stable output.
+func sortReports(reports []FileReport) []FileReport {
+	sorted := append([]FileReport(nil), reports...)
+
+	sort.Slice(sorted, func(i, j int) bool {
+		return sorted[i].FileName < sorted[j].FileName
+	})
+
+	return sorted
 }

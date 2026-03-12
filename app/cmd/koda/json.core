@@ -1,0 +1,22 @@
+LANG "json" EXTENSIONS ["json"] {
+	SECTION TOKENS {
+		DEFINE "key" ENCLOSED_BY '"' '"'
+		DEFINE "colon" LITERAL ":"
+		DEFINE "comma" LITERAL ","
+		DEFINE "brace_close" LITERAL "}"
+	}
+
+	SECTION RULES {
+		RULE "pair_format" {
+			MATCH "key"
+			MUST_BE_FOLLOWED_BY "colon"
+			ERROR "JSON keys must be followed by a colon."
+		}
+
+		RULE "no_trailing_comma" {
+			MATCH "comma"
+			CANNOT_BE_FOLLOWED_BY "brace_close"
+			ERROR "Trailing commas break standard JSON."
+		}
+	}
+}
